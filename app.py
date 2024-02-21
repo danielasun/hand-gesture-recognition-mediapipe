@@ -15,6 +15,8 @@ from utils import CvFpsCalc
 from model import KeyPointClassifier
 from model import PointHistoryClassifier
 
+from pythonosc import udp_client
+
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -27,11 +29,15 @@ def get_args():
     parser.add_argument("--min_detection_confidence",
                         help='min_detection_confidence',
                         type=float,
-                        default=0.7)
+                        default=0.2)
     parser.add_argument("--min_tracking_confidence",
                         help='min_tracking_confidence',
                         type=int,
-                        default=0.5)
+                        default=0.3)
+    parser.add_argument("--ip", default="127.0.0.1",
+                        help="The ip of the OSC server")
+    parser.add_argument("--port", type=int, default=10111,
+      help="The port the OSC server is listening on")
 
     args = parser.parse_args()
 
@@ -52,6 +58,9 @@ def main():
 
     use_brect = True
 
+    # OSC Client #######################################################################
+    osc_client = udp_client.SimpleUDPClient(args.ip, args.port)
+
     # Camera preparation ###############################################################
     cap = cv.VideoCapture(cap_device)
     cap.set(cv.CAP_PROP_FRAME_WIDTH, cap_width)
@@ -61,7 +70,7 @@ def main():
     mp_hands = mp.solutions.hands
     hands = mp_hands.Hands(
         static_image_mode=use_static_image_mode,
-        max_num_hands=1,
+        max_num_hands=2,
         min_detection_confidence=min_detection_confidence,
         min_tracking_confidence=min_tracking_confidence,
     )
@@ -168,8 +177,13 @@ def main():
                     keypoint_classifier_labels[hand_sign_id],
                     point_history_classifier_labels[most_common_fg_id[0][0]],
                 )
+            osc_client.send_message("/filter", scale_number(point_history[-1][0], 0, 1, 0, cap_width))
+            osc_client.send_message("/volume", scale_number(point_history[-1][1], 0, 1, 0, cap_height))
         else:
             point_history.append([0, 0])
+            
+        print(point_history[-1])
+
 
         debug_image = draw_point_history(debug_image, point_history)
         debug_image = draw_info(debug_image, fps, mode, number)
@@ -538,6 +552,8 @@ def draw_info(image, fps, mode, number):
                        cv.LINE_AA)
     return image
 
+def scale_number(unscaled, to_min, to_max, from_min, from_max):
+    return (to_max-to_min)*(unscaled-from_min)/(from_max-from_min)+to_min
 
 if __name__ == '__main__':
     main()
