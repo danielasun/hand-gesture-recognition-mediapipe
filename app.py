@@ -16,6 +16,7 @@ from model import KeyPointClassifier
 from model import PointHistoryClassifier
 
 from pythonosc import udp_client
+import enum
 
 
 def get_args():
@@ -29,7 +30,7 @@ def get_args():
     parser.add_argument("--min_detection_confidence",
                         help='min_detection_confidence',
                         type=float,
-                        default=0.2)
+                        default=0.5)
     parser.add_argument("--min_tracking_confidence",
                         help='min_tracking_confidence',
                         type=int,
@@ -42,6 +43,10 @@ def get_args():
     args = parser.parse_args()
 
     return args
+
+class Handedness(enum.StrEnum):
+    LEFT = "Left"
+    RIGHT = "Right"
 
 
 def main():
@@ -150,10 +155,11 @@ def main():
 
                 # Hand sign classification
                 hand_sign_id = keypoint_classifier(pre_processed_landmark_list)
-                if hand_sign_id == 2:  # Point gesture
-                    point_history.append(landmark_list[8])
+                if hand_sign_id == 2 and handedness.classification[0].label == Handedness.LEFT:  # Point gesture
+                    point_history.append(landmark_list[8])  # TODO: allow pointing with other fingers
                 else:
-                    point_history.append([0, 0])
+                    pass
+                    # point_history.append([0, 0])
 
                 # Finger gesture classification
                 finger_gesture_id = 0
@@ -177,12 +183,19 @@ def main():
                     keypoint_classifier_labels[hand_sign_id],
                     point_history_classifier_labels[most_common_fg_id[0][0]],
                 )
-            osc_client.send_message("/filter", scale_number(point_history[-1][0], 0, 1, 0, cap_width))
-            osc_client.send_message("/volume", scale_number(point_history[-1][1], 0, 1, 0, cap_height))
-        else:
-            point_history.append([0, 0])
+                print(f"handedness: {handedness.classification[0].label}")
+            try:
+                osc_client.send_message("/filter", scale_number(point_history[-1][0], 0, 1, 0, cap_width))
+                osc_client.send_message("/volume", scale_number(point_history[-1][1], 0, 1, 0, cap_height))
+            except IndexError:
+                pass
+
             
-        print(point_history[-1])
+            # point_history.append([0, 0])
+        try:
+            print(point_history[-1])
+        except IndexError:
+            pass # if there's no registered points, skip
 
 
         debug_image = draw_point_history(debug_image, point_history)
