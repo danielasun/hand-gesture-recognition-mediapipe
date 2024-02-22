@@ -104,7 +104,8 @@ def main():
 
     # Coordinate history #################################################################
     history_length = 16
-    point_history = deque(maxlen=history_length)
+    point_history = {Handedness.LEFT: deque(maxlen=history_length),
+                     Handedness.RIGHT: deque(maxlen=history_length)}
 
     # Finger gesture history ################################################
     finger_gesture_history = deque(maxlen=history_length)
@@ -139,6 +140,9 @@ def main():
         if results.multi_hand_landmarks is not None:
             for hand_landmarks, handedness in zip(results.multi_hand_landmarks,
                                                   results.multi_handedness):
+                hand_label = handedness.classification[0].label  # Handedness.LEFT or Handedness.RIGHT
+
+
                 # Bounding box calculation
                 brect = calc_bounding_rect(debug_image, hand_landmarks)
                 # Landmark calculation
@@ -148,18 +152,25 @@ def main():
                 pre_processed_landmark_list = pre_process_landmark(
                     landmark_list)
                 pre_processed_point_history_list = pre_process_point_history(
-                    debug_image, point_history)
+                    debug_image, point_history[hand_label])
                 # Write to the dataset file
                 logging_csv(number, mode, pre_processed_landmark_list,
                             pre_processed_point_history_list)
 
                 # Hand sign classification
                 hand_sign_id = keypoint_classifier(pre_processed_landmark_list)
-                if hand_sign_id == 2 and handedness.classification[0].label == Handedness.LEFT:  # Point gesture
-                    point_history.append(landmark_list[8])  # TODO: allow pointing with other fingers
+                if hand_sign_id == 2: # Point gesture
+                    if handedness.classification[0].label == Handedness.LEFT:  
+                        point_history[hand_label].append(landmark_list[8])
+                        val = -scale_number(point_history[hand_label][-1][1], 1, 0, 0, cap_height)
+                        osc_client.send_message("/filter", val)
+                    if handedness.classification[0].label == Handedness.RIGHT:
+                        point_history[hand_label].append(landmark_list[8])
+                        val = -scale_number(point_history[hand_label][-1][1], 1, 0, 0, cap_height)
+                        osc_client.send_message("/delay", val)
                 else:
                     pass
-                    # point_history.append([0, 0])
+                    # point_history[hand_label].append([0, 0])
 
                 # Finger gesture classification
                 finger_gesture_id = 0
@@ -184,21 +195,15 @@ def main():
                     point_history_classifier_labels[most_common_fg_id[0][0]],
                 )
                 print(f"handedness: {handedness.classification[0].label}")
-            try:
-                osc_client.send_message("/filter", scale_number(point_history[-1][0], 0, 1, 0, cap_width))
-                osc_client.send_message("/volume", scale_number(point_history[-1][1], 0, 1, 0, cap_height))
-            except IndexError:
-                pass
 
-            
-            # point_history.append([0, 0])
-        try:
-            print(point_history[-1])
-        except IndexError:
-            pass # if there's no registered points, skip
+                try:
+                    print(point_history[hand_label][-1])
+                except IndexError:
+                    pass # if there's no registered points, skip
 
 
-        debug_image = draw_point_history(debug_image, point_history)
+        for hand_label in (Handedness.LEFT, Handedness.RIGHT):
+            debug_image = draw_point_history(debug_image, point_history[hand_label], hand_label)
         debug_image = draw_info(debug_image, fps, mode, number)
 
         # Screen reflection #############################################################
@@ -539,11 +544,16 @@ def draw_info_text(image, brect, handedness, hand_sign_text,
     return image
 
 
-def draw_point_history(image, point_history):
+def draw_point_history(image, point_history, hand_label: Handedness):
     for index, point in enumerate(point_history):
         if point[0] != 0 and point[1] != 0:
-            cv.circle(image, (point[0], point[1]), 1 + int(index / 2),
-                      (152, 251, 152), 2)
+            if hand_label == Handedness.LEFT:
+                color = (242, 24, 242)  # magenta
+            elif hand_label == Handedness.RIGHT: 
+                color = (242, 231, 24)  # CYAN
+            else:
+                raise Exception("Not a valid Handedness")
+            cv.circle(image, (point[0], point[1]), 1 + int(index / 2), color, 2)
 
     return image
 
@@ -566,7 +576,7 @@ def draw_info(image, fps, mode, number):
     return image
 
 def scale_number(unscaled, to_min, to_max, from_min, from_max):
-    return (to_max-to_min)*(unscaled-from_min)/(from_max-from_min)+to_min
+    return (to_max-to_min)*(unscaled-from_min)/(from_max-from_min)
 
 if __name__ == '__main__':
     main()
